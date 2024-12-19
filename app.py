@@ -3,11 +3,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
-from flask_mail import Mail, Message
 from flask_migrate import Migrate
-from datetime import datetime, timedelta
-from apscheduler.schedulers.background import BackgroundScheduler
-import pytz
+from datetime import datetime
 from werkzeug.utils import secure_filename
 
 # تكوين المجلد للملفات المرفقة
@@ -32,20 +29,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# تكوين البريد الإلكتروني
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
-
 # تهيئة الإضافات
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-mail = Mail(app)
 migrate = Migrate(app, db)
 
 # تعريف النماذج
@@ -71,8 +59,6 @@ class Task(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     attachments = db.relationship('Attachment', backref='task', lazy=True, cascade='all, delete-orphan')
-    notification_preferences = db.Column(db.String(200), default='1week,2days,1day,5hours,3hours,1hour,30min')
-    last_notification = db.Column(db.DateTime)
 
 class Attachment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -83,72 +69,6 @@ class Attachment(db.Model):
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
-
-def send_reminder_email(task):
-    user = User.query.get(task.user_id)
-    if not user or not user.email:
-        return
-    
-    subject = f"تذكير: المهمة {task.title} قريبة من الموعد النهائي"
-    body = f"""
-    مرحباً {user.username}،
-    
-    هذا تذكير بأن مهمتك "{task.title}" ستنتهي قريباً.
-    
-    تفاصيل المهمة:
-    - الوصف: {task.description}
-    - الموعد النهائي: {task.deadline.strftime('%Y-%m-%d %H:%M')}
-    
-    يرجى إكمال المهمة في الوقت المحدد.
-    """
-    
-    msg = Message(subject,
-                recipients=[user.email],
-                body=body)
-    mail.send(msg)
-
-def check_upcoming_deadlines():
-    with app.app_context():
-        current_time = datetime.now()
-        tasks = Task.query.all()
-        
-        for task in tasks:
-            if not task.notification_preferences:
-                continue
-                
-            preferences = task.notification_preferences.split(',')
-            time_until_deadline = task.deadline - current_time
-            
-            notification_times = {
-                '1week': 7 * 24 * 60,
-                '2days': 2 * 24 * 60,
-                '1day': 24 * 60,
-                '5hours': 5 * 60,
-                '3hours': 3 * 60,
-                '1hour': 60,
-                '30min': 30
-            }
-            
-            for pref in preferences:
-                if pref in notification_times:
-                    minutes = notification_times[pref]
-                    if timedelta(minutes=minutes-1) <= time_until_deadline <= timedelta(minutes=minutes):
-                        if not task.last_notification or \
-                           (current_time - task.last_notification).total_seconds() > 3600:
-                            try:
-                                send_reminder_email(task)
-                                task.last_notification = current_time
-                                db.session.commit()
-                            except Exception as e:
-                                print(f"Error sending reminder email: {e}")
-
-# تكوين المجدول
-try:
-    scheduler = BackgroundScheduler(timezone=pytz.UTC)
-    scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
-    scheduler.start()
-except Exception as e:
-    print(f"Error starting scheduler: {e}")
 
 @app.before_first_request
 def create_tables():
@@ -184,16 +104,12 @@ def create_task():
         task_type = request.form.get('task_type')
         deadline = datetime.strptime(request.form.get('deadline'), '%Y-%m-%dT%H:%M')
         
-        notifications = request.form.getlist('notifications')
-        notification_preferences = ','.join(notifications) if notifications else None
-        
         task = Task(
             title=title,
             description=description,
             task_type=task_type,
             deadline=deadline,
-            user_id=current_user.id,
-            notification_preferences=notification_preferences
+            user_id=current_user.id
         )
         
         files = request.files.getlist('attachments')
@@ -299,10 +215,6 @@ def edit_task(task_id):
         task.description = request.form.get('description')
         task.task_type = request.form.get('task_type')
         task.deadline = datetime.strptime(request.form.get('deadline'), '%Y-%m-%dT%H:%M')
-        
-        # تحديث تفضيلات الإشعارات
-        notifications = request.form.getlist('notifications')
-        task.notification_preferences = ','.join(notifications) if notifications else None
         
         files = request.files.getlist('attachments')
         for file in files:
