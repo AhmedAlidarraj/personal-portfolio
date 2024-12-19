@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <h2 class="mb-4">إضافة مهمة جديدة</h2>
+        <form method="POST" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="title" class="form-label">عنوان المهمة</label>
+                <input type="text" class="form-control" id="title" name="title" required>
+            </div>
+            
+            <div class="mb-3">
+                <label for="description" class="form-label">وصف المهمة</label>
+                <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+            </div>
+            
+            <div class="mb-3">
+                <label for="task_type" class="form-label">نوع المهمة</label>
+                <select class="form-control" id="task_type" name="task_type" required>
+                    <option value="شخصي">شخصي</option>
+                    <option value="عمل">عمل</option>
+                    <option value="دراسة">دراسة</option>
+                    <option value="آخر">آخر</option>
+                </select>
+            </div>
+            
+            <div class="mb-3">
+                <label for="deadline" class="form-label">الموعد النهائي</label>
+                <input type="datetime-local" class="form-control" id="deadline" name="deadline" required>
+            </div>
+            
+            <div class="mb-3">
+                <label for="attachments" class="form-label">المرفقات</label>
+                <input type="file" class="form-control" id="attachments" name="attachments" multiple>
+            </div>
+            
+            <div class="mb-3">
+                <button type="button" class="btn btn-secondary" id="capture-photo">
+                    <i class="fas fa-camera"></i> التقاط صورة
+                </button>
+                <video id="camera-preview" style="display: none; width: 100%; max-width: 500px;" autoplay></video>
+                <canvas id="photo-canvas" style="display: none;"></canvas>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">إضافة المهمة</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

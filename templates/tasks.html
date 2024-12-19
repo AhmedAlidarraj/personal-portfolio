@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>مهامي</h2>
+        <a href="{{ url_for('new_task') }}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> إضافة مهمة جديدة
+        </a>
+    </div>
+
+    <div class="row">
+        {% for task in tasks %}
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">{{ task.title }}</h5>
+                    <p class="card-text">{{ task.description }}</p>
+                    <div class="task-info">
+                        <p><strong>النوع:</strong> {{ task.task_type }}</p>
+                        <p><strong>تاريخ الإنشاء:</strong> {{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                        <p><strong>الموعد النهائي:</strong> {{ task.deadline.strftime('%Y-%m-%d %H:%M') }}</p>
+                    </div>
+                    
+                    <div class="countdown-container">
+                        <div class="countdown-text" data-deadline="{{ task.deadline.isoformat() }}">
+                            <i class="fas fa-clock"></i>
+                            <span class="countdown-value"></span>
+                        </div>
+                        <div class="progress mt-2">
+                            <div class="progress-bar" role="progressbar" style="width: 100%"></div>
+                        </div>
+                    </div>
+
+                    {% if task.attachments %}
+                    <div class="attachments mt-3">
+                        <h6><i class="fas fa-paperclip"></i> المرفقات:</h6>
+                        <div class="attachment-list">
+                            {% for attachment in task.attachments %}
+                            <div class="attachment-item">
+                                {% if attachment.file_type and attachment.file_type.startswith('image/') %}
+                                <img src="{{ url_for('static', filename='uploads/' + attachment.filename) }}" 
+                                     class="attachment-preview" alt="{{ attachment.filename }}">
+                                {% else %}
+                                <a href="{{ url_for('static', filename='uploads/' + attachment.filename) }}" 
+                                   target="_blank" class="attachment-link">
+                                    <i class="fas fa-file"></i> {{ attachment.filename }}
+                                </a>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %}
