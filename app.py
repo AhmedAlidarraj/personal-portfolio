@@ -17,6 +17,8 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
+
+# تكوين السر
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
 
 # تكوين قاعدة البيانات
@@ -31,12 +33,13 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 # تكوين البريد الإلكتروني
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
 
+# تهيئة الإضافات
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
@@ -45,21 +48,27 @@ mail = Mail(app)
 migrate = Migrate(app, db)
 
 # تكوين المجدول
-scheduler = BackgroundScheduler(timezone=pytz.UTC)
-scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
-scheduler.start()
+try:
+    scheduler = BackgroundScheduler(timezone=pytz.UTC)
+    scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
+    scheduler.start()
+except Exception as e:
+    print(f"Error starting scheduler: {e}")
 
 @app.before_first_request
 def create_tables():
-    db.create_all()
-    
-    # إنشاء مستخدم افتراضي إذا لم يكن موجوداً
-    admin_user = User.query.filter_by(username='admin').first()
-    if not admin_user:
-        admin = User(username='admin', email='admin@example.com')
-        admin.set_password('admin123')
-        db.session.add(admin)
-        db.session.commit()
+    try:
+        db.create_all()
+        
+        # إنشاء مستخدم افتراضي إذا لم يكن موجوداً
+        admin_user = User.query.filter_by(username='admin').first()
+        if not admin_user:
+            admin = User(username='admin', email='admin@example.com')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+    except Exception as e:
+        print(f"Error in create_tables: {e}")
 
 # تعريف النماذج
 class User(UserMixin, db.Model):

@@ -5,8 +5,10 @@ set -o errexit
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Create upload directory
+# Create necessary directories
 mkdir -p static/uploads
 
-# Initialize the database
-python3 -c "from app import db; db.create_all()"
+# Initialize and upgrade the database
+flask db init || true
+flask db migrate -m "Initial migration" || true
+flask db upgrade || true
