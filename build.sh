@@ -8,7 +8,7 @@ pip install -r requirements.txt
 # Create necessary directories
 mkdir -p static/uploads
 
-# Initialize and upgrade the database
-flask db init || true
-flask db migrate -m "Initial migration" || true
-flask db upgrade || true
+# Reset and initialize the database
+flask db stamp head
+flask db migrate -m "Remove notification system"
+flask db upgrade
