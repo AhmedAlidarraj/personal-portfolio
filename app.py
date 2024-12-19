@@ -223,5 +223,83 @@ def logout():
     logout_user()
     return redirect(url_for('home'))
 
+@app.route('/delete_task/<int:task_id>', methods=['POST'])
+@login_required
+def delete_task(task_id):
+    task = Task.query.get_or_404(task_id)
+    if task.user_id != current_user.id:
+        flash('لا يمكنك حذف هذه المهمة', 'error')
+        return redirect(url_for('tasks'))
+    
+    # حذف الملفات المرفقة من المجلد
+    for attachment in task.attachments:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], attachment.filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    
+    db.session.delete(task)
+    db.session.commit()
+    flash('تم حذف المهمة بنجاح', 'success')
+    return redirect(url_for('tasks'))
+
+@app.route('/edit_task/<int:task_id>', methods=['GET', 'POST'])
+@login_required
+def edit_task(task_id):
+    task = Task.query.get_or_404(task_id)
+    if task.user_id != current_user.id:
+        flash('لا يمكنك تعديل هذه المهمة', 'error')
+        return redirect(url_for('tasks'))
+    
+    if request.method == 'POST':
+        task.title = request.form['title']
+        task.description = request.form['description']
+        task.task_type = request.form['task_type']
+        task.deadline = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M')
+        
+        # معالجة الملفات المرفقة الجديدة
+        if 'attachments' in request.files:
+            files = request.files.getlist('attachments')
+            for file in files:
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    unique_filename = f"{int(time.time())}_{filename}"
+                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                    file.save(file_path)
+                    
+                    attachment = Attachment(
+                        filename=unique_filename,
+                        file_type=file.content_type,
+                        task_id=task.id
+                    )
+                    db.session.add(attachment)
+        
+        try:
+            db.session.commit()
+            flash('تم تحديث المهمة بنجاح', 'success')
+            return redirect(url_for('tasks'))
+        except Exception as e:
+            db.session.rollback()
+            flash('حدث خطأ أثناء تحديث المهمة', 'error')
+    
+    return render_template('edit_task.html', task=task)
+
+@app.route('/delete_attachment/<int:attachment_id>', methods=['POST'])
+@login_required
+def delete_attachment(attachment_id):
+    attachment = Attachment.query.get_or_404(attachment_id)
+    if attachment.task.user_id != current_user.id:
+        flash('لا يمكنك حذف هذا الملف', 'error')
+        return redirect(url_for('tasks'))
+    
+    # حذف الملف من المجلد
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], attachment.filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    db.session.delete(attachment)
+    db.session.commit()
+    flash('تم حذف الملف بنجاح', 'success')
+    return redirect(url_for('edit_task', task_id=attachment.task_id))
+
 if __name__ == '__main__':
     app.run(debug=True)
