@@ -6,7 +6,6 @@ from flask_bcrypt import Bcrypt
 from flask_mail import Mail, Message
 from flask_migrate import Migrate
 from datetime import datetime, timedelta
-from apscheduler.schedulers.background import BackgroundScheduler
 import pytz
 from werkzeug.utils import secure_filename
 
@@ -71,8 +70,7 @@ class Task(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     attachments = db.relationship('Attachment', backref='task', lazy=True, cascade='all, delete-orphan')
-    notification_preferences = db.Column(db.String(200), default='1day,3hours,1hour')
-    last_notification = db.Column(db.DateTime)
+    notification_sent = db.Column(db.Boolean, default=False)
 
 class Attachment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -84,24 +82,25 @@ class Attachment(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-def send_notification(task, time_remaining):
+def send_notification(task):
     """إرسال إشعار بريد إلكتروني للمستخدم"""
     try:
+        if task.notification_sent:
+            return False
+
         user = User.query.get(task.user_id)
         if not user or not user.email:
-            return
+            return False
 
-        time_text = {
-            '1day': 'يوم واحد',
-            '3hours': '3 ساعات',
-            '1hour': 'ساعة واحدة'
-        }.get(time_remaining, time_remaining)
+        time_until_deadline = task.deadline - datetime.now()
+        if time_until_deadline > timedelta(days=1):
+            return False
 
-        subject = f"تذكير: المهمة {task.title} تنتهي خلال {time_text}"
+        subject = f"تذكير: المهمة {task.title} قريبة من الموعد النهائي"
         body = f"""
         مرحباً {user.username}،
 
-        هذا تذكير بأن مهمتك "{task.title}" ستنتهي خلال {time_text}.
+        هذا تذكير بأن مهمتك "{task.title}" ستنتهي قريباً.
 
         تفاصيل المهمة:
         - الوصف: {task.description}
@@ -116,55 +115,12 @@ def send_notification(task, time_remaining):
             body=body
         )
         mail.send(msg)
+        task.notification_sent = True
+        db.session.commit()
         return True
     except Exception as e:
         print(f"خطأ في إرسال الإشعار: {e}")
         return False
-
-def check_deadlines():
-    """التحقق من المواعيد النهائية وإرسال الإشعارات"""
-    try:
-        with app.app_context():
-            current_time = datetime.now(pytz.UTC)
-            tasks = Task.query.filter(
-                Task.deadline > current_time,
-                Task.notification_preferences.isnot(None)
-            ).all()
-
-            for task in tasks:
-                if not task.notification_preferences:
-                    continue
-
-                preferences = task.notification_preferences.split(',')
-                time_until_deadline = task.deadline.replace(tzinfo=pytz.UTC) - current_time
-
-                notification_times = {
-                    '1day': timedelta(days=1),
-                    '3hours': timedelta(hours=3),
-                    '1hour': timedelta(hours=1)
-                }
-
-                for pref in preferences:
-                    if pref in notification_times:
-                        target_delta = notification_times[pref]
-                        actual_delta = abs(time_until_deadline - target_delta)
-
-                        if actual_delta <= timedelta(minutes=5):
-                            if not task.last_notification or \
-                               current_time - task.last_notification.replace(tzinfo=pytz.UTC) > timedelta(hours=1):
-                                if send_notification(task, pref):
-                                    task.last_notification = current_time
-                                    db.session.commit()
-    except Exception as e:
-        print(f"خطأ في فحص المواعيد النهائية: {e}")
-
-# تكوين المجدول
-try:
-    scheduler = BackgroundScheduler(timezone=pytz.UTC)
-    scheduler.add_job(func=check_deadlines, trigger="interval", minutes=5)
-    scheduler.start()
-except Exception as e:
-    print(f"خطأ في بدء المجدول: {e}")
 
 @app.before_first_request
 def create_tables():
@@ -180,6 +136,23 @@ def create_tables():
             db.session.commit()
     except Exception as e:
         print(f"خطأ في إنشاء الجداول: {e}")
+
+@app.route('/check_notifications')
+def check_notifications():
+    """التحقق من المواعيد النهائية وإرسال الإشعارات"""
+    try:
+        tasks = Task.query.filter(
+            Task.deadline > datetime.now(),
+            Task.notification_sent == False
+        ).all()
+
+        for task in tasks:
+            send_notification(task)
+
+        return jsonify({"status": "success"})
+    except Exception as e:
+        print(f"خطأ في فحص الإشعارات: {e}")
+        return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/')
 def home():
