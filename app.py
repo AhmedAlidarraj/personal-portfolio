@@ -8,6 +8,7 @@ import os
 import pytz
 from werkzeug.utils import secure_filename
 import time
+from flask_bcrypt import Bcrypt, generate_password_hash, check_password_hash
 
 # تكوين المجلد للملفات المرفقة
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static/uploads')
@@ -35,16 +36,24 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 
 db = SQLAlchemy(app)
+bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 mail = Mail(app)
 
-# Models
+# تعريف النماذج
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
+    password_hash = db.Column(db.String(128))
     tasks = db.relationship('Task', backref='user', lazy=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
 
 class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -54,12 +63,12 @@ class Task(db.Model):
     deadline = db.Column(db.DateTime, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    attachments = db.relationship('Attachment', backref='task', lazy=True)
+    attachments = db.relationship('Attachment', backref='task', lazy=True, cascade='all, delete-orphan')
 
 class Attachment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String(200), nullable=False)
-    file_type = db.Column(db.String(50))
+    filename = db.Column(db.String(255), nullable=False)
+    file_type = db.Column(db.String(100))
     task_id = db.Column(db.Integer, db.ForeignKey('task.id'), nullable=False)
 
 @login_manager.user_loader
@@ -82,6 +91,22 @@ def check_upcoming_deadlines():
 scheduler = BackgroundScheduler(timezone=pytz.UTC)
 scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", hours=24)
 scheduler.start()
+
+def init_db():
+    with app.app_context():
+        # إنشاء جميع الجداول
+        db.create_all()
+        
+        # التحقق من وجود مستخدم افتراضي
+        admin_user = User.query.filter_by(username='admin').first()
+        if not admin_user:
+            admin = User(username='admin', email='admin@example.com')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+
+# تهيئة قاعدة البيانات عند بدء التطبيق
+init_db()
 
 @app.route('/')
 def home():
@@ -154,7 +179,7 @@ def login():
         password = request.form['password']
         user = User.query.filter_by(username=username).first()
         
-        if user and user.password == password:  # في التطبيق الحقيقي، يجب استخدام تشفير كلمة المرور
+        if user and user.check_password(password):  
             login_user(user)
             return redirect(url_for('tasks'))
         
@@ -178,7 +203,8 @@ def register():
             flash('البريد الإلكتروني مستخدم مسبقاً، الرجاء استخدام بريد آخر', 'error')
             return redirect(url_for('register'))
         
-        user = User(username=username, email=email, password=password)
+        user = User(username=username, email=email)
+        user.set_password(password)
         try:
             db.session.add(user)
             db.session.commit()
@@ -198,6 +224,4 @@ def logout():
     return redirect(url_for('home'))
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     app.run(debug=True)
