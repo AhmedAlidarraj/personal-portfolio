@@ -72,6 +72,17 @@
         </div>
         {% endfor %}
     </div>
+    <div class="camera-section" style="display: none;">
+        <div class="camera-container">
+            <video id="camera-preview" class="camera-video" autoplay playsinline></video>
+            <canvas id="photo-canvas" style="display: none;"></canvas>
+        </div>
+        <div class="text-center mt-3">
+            <button id="capture-photo" class="btn btn-primary">
+                <i class="fas fa-camera"></i> التقاط صورة
+            </button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 

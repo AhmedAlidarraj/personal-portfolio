@@ -78,8 +78,61 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// التقاط الصور من الكاميرا
+// دالة إدارة الكاميرا
+function initializeCamera() {
+    const videoElement = document.querySelector('video');
+    if (videoElement) {
+        // إضافة الفئات للتنسيق
+        videoElement.classList.add('camera-video');
+        const container = document.createElement('div');
+        container.className = 'camera-container';
+        videoElement.parentElement.insertBefore(container, videoElement);
+        container.appendChild(videoElement);
+
+        // إنشاء زر الإغلاق
+        const closeButton = document.createElement('button');
+        closeButton.className = 'camera-close-btn btn';
+        closeButton.innerHTML = '<i class="fas fa-times"></i> إغلاق الكاميرا';
+        
+        // وظيفة إغلاق الكاميرا
+        closeButton.onclick = function() {
+            if (videoElement.srcObject) {
+                const tracks = videoElement.srcObject.getTracks();
+                tracks.forEach(track => {
+                    track.stop();
+                    videoElement.srcObject.removeTrack(track);
+                });
+                videoElement.srcObject = null;
+                container.style.display = 'none';
+            }
+        };
+
+        container.appendChild(closeButton);
+
+        // معالجة أخطاء الكاميرا
+        videoElement.onerror = function(error) {
+            console.error('خطأ في الكاميرا:', error);
+            alert('حدث خطأ في الوصول إلى الكاميرا. يرجى التحقق من إذونات الكاميرا.');
+        };
+    }
+}
+
+// تهيئة الكاميرا عند تحميل الصفحة
 document.addEventListener('DOMContentLoaded', function() {
+    initializeCamera();
+    
+    // إعادة تهيئة الكاميرا عند فتحها من جديد
+    const cameraButtons = document.querySelectorAll('.open-camera-btn');
+    cameraButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const container = document.querySelector('.camera-container');
+            if (container) {
+                container.style.display = 'block';
+                initializeCamera();
+            }
+        });
+    });
+
     const captureBtn = document.getElementById('capture-photo');
     const videoPreview = document.getElementById('camera-preview');
     const photoCanvas = document.getElementById('photo-canvas');
