@@ -3,8 +3,11 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
+from flask_mail import Mail, Message
 from flask_migrate import Migrate
-from datetime import datetime
+from datetime import datetime, timedelta
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
 from werkzeug.utils import secure_filename
 
 # تكوين المجلد للملفات المرفقة
@@ -29,11 +32,20 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
+# تكوين البريد الإلكتروني
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
+
 # تهيئة الإضافات
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+mail = Mail(app)
 migrate = Migrate(app, db)
 
 # تعريف النماذج
@@ -59,6 +71,8 @@ class Task(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     attachments = db.relationship('Attachment', backref='task', lazy=True, cascade='all, delete-orphan')
+    notification_preferences = db.Column(db.String(200), default='1day,3hours,1hour')
+    last_notification = db.Column(db.DateTime)
 
 class Attachment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -69,6 +83,88 @@ class Attachment(db.Model):
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+def send_notification(task, time_remaining):
+    """إرسال إشعار بريد إلكتروني للمستخدم"""
+    try:
+        user = User.query.get(task.user_id)
+        if not user or not user.email:
+            return
+
+        time_text = {
+            '1day': 'يوم واحد',
+            '3hours': '3 ساعات',
+            '1hour': 'ساعة واحدة'
+        }.get(time_remaining, time_remaining)
+
+        subject = f"تذكير: المهمة {task.title} تنتهي خلال {time_text}"
+        body = f"""
+        مرحباً {user.username}،
+
+        هذا تذكير بأن مهمتك "{task.title}" ستنتهي خلال {time_text}.
+
+        تفاصيل المهمة:
+        - الوصف: {task.description}
+        - الموعد النهائي: {task.deadline.strftime('%Y-%m-%d %H:%M')}
+
+        يرجى إكمال المهمة في الوقت المحدد.
+        """
+
+        msg = Message(
+            subject=subject,
+            recipients=[user.email],
+            body=body
+        )
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f"خطأ في إرسال الإشعار: {e}")
+        return False
+
+def check_deadlines():
+    """التحقق من المواعيد النهائية وإرسال الإشعارات"""
+    try:
+        with app.app_context():
+            current_time = datetime.now(pytz.UTC)
+            tasks = Task.query.filter(
+                Task.deadline > current_time,
+                Task.notification_preferences.isnot(None)
+            ).all()
+
+            for task in tasks:
+                if not task.notification_preferences:
+                    continue
+
+                preferences = task.notification_preferences.split(',')
+                time_until_deadline = task.deadline.replace(tzinfo=pytz.UTC) - current_time
+
+                notification_times = {
+                    '1day': timedelta(days=1),
+                    '3hours': timedelta(hours=3),
+                    '1hour': timedelta(hours=1)
+                }
+
+                for pref in preferences:
+                    if pref in notification_times:
+                        target_delta = notification_times[pref]
+                        actual_delta = abs(time_until_deadline - target_delta)
+
+                        if actual_delta <= timedelta(minutes=5):
+                            if not task.last_notification or \
+                               current_time - task.last_notification.replace(tzinfo=pytz.UTC) > timedelta(hours=1):
+                                if send_notification(task, pref):
+                                    task.last_notification = current_time
+                                    db.session.commit()
+    except Exception as e:
+        print(f"خطأ في فحص المواعيد النهائية: {e}")
+
+# تكوين المجدول
+try:
+    scheduler = BackgroundScheduler(timezone=pytz.UTC)
+    scheduler.add_job(func=check_deadlines, trigger="interval", minutes=5)
+    scheduler.start()
+except Exception as e:
+    print(f"خطأ في بدء المجدول: {e}")
 
 @app.before_first_request
 def create_tables():
@@ -83,7 +179,7 @@ def create_tables():
             db.session.add(admin)
             db.session.commit()
     except Exception as e:
-        print(f"Error in create_tables: {e}")
+        print(f"خطأ في إنشاء الجداول: {e}")
 
 @app.route('/')
 def home():
