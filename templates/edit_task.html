@@ -25,6 +25,49 @@
             <input type="datetime-local" class="form-control" id="deadline" name="deadline" 
                    value="{{ task.deadline.strftime('%Y-%m-%dT%H:%M') }}" required>
         </div>
+        
+        <div class="mb-3">
+            <label class="form-label">تفضيلات الإشعارات</label>
+            <div class="notification-preferences">
+                {% set notifications = task.notification_preferences.split(',') if task.notification_preferences else [] %}
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="1week" 
+                           id="notify-1week" {% if '1week' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-1week">قبل أسبوع</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="2days" 
+                           id="notify-2days" {% if '2days' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-2days">قبل يومين</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="1day" 
+                           id="notify-1day" {% if '1day' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-1day">قبل يوم</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="5hours" 
+                           id="notify-5hours" {% if '5hours' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-5hours">قبل 5 ساعات</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="3hours" 
+                           id="notify-3hours" {% if '3hours' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-3hours">قبل 3 ساعات</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="1hour" 
+                           id="notify-1hour" {% if '1hour' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-1hour">قبل ساعة</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="30min" 
+                           id="notify-30min" {% if '30min' in notifications %}checked{% endif %}>
+                    <label class="form-check-label" for="notify-30min">قبل نصف ساعة</label>
+                </div>
+            </div>
+        </div>
+
         <div class="mb-3">
             <label for="attachments" class="form-label">إضافة مرفقات جديدة</label>
             <input type="file" class="form-control" id="attachments" name="attachments" multiple>
@@ -59,27 +102,16 @@
     </form>
 </div>
 
-<script>
-// إضافة زر إغلاق الكاميرا
-document.addEventListener('DOMContentLoaded', function() {
-    const videoElement = document.querySelector('video');
-    if (videoElement) {
-        const closeButton = document.createElement('button');
-        closeButton.className = 'btn btn-danger position-absolute';
-        closeButton.style.top = '10px';
-        closeButton.style.right = '10px';
-        closeButton.innerHTML = '<i class="fas fa-times"></i> إغلاق الكاميرا';
-        closeButton.onclick = function() {
-            if (videoElement.srcObject) {
-                videoElement.srcObject.getTracks().forEach(track => track.stop());
-                videoElement.srcObject = null;
-                videoElement.style.display = 'none';
-                this.style.display = 'none';
-            }
-        };
-        videoElement.parentElement.style.position = 'relative';
-        videoElement.parentElement.appendChild(closeButton);
-    }
-});
-</script>
+<style>
+.notification-preferences {
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    padding: 1rem;
+    background-color: #f8f9fa;
+}
+
+.notification-preferences .form-check {
+    margin-bottom: 0.5rem;
+}
+</style>
 {% endblock %}

@@ -9,6 +9,7 @@ import pytz
 from werkzeug.utils import secure_filename
 import time
 from flask_bcrypt import Bcrypt, generate_password_hash, check_password_hash
+from flask_migrate import Migrate
 
 # تكوين المجلد للملفات المرفقة
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static/uploads')
@@ -40,20 +41,21 @@ bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 mail = Mail(app)
+migrate = Migrate(app, db)
 
 # تعريف النماذج
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128))
+    password = db.Column(db.String(120), nullable=False)
     tasks = db.relationship('Task', backref='user', lazy=True)
 
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        self.password = generate_password_hash(password)
 
     def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
+        return check_password_hash(self.password, password)
 
 class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -64,6 +66,8 @@ class Task(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     attachments = db.relationship('Attachment', backref='task', lazy=True, cascade='all, delete-orphan')
+    notification_preferences = db.Column(db.String(200), default='1week,2days,1day,5hours,3hours,1hour,30min')
+    last_notification = db.Column(db.DateTime)
 
 class Attachment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -83,13 +87,69 @@ def send_reminder_email(task):
     mail.send(msg)
 
 def check_upcoming_deadlines():
-    tasks = Task.query.all()
-    for task in tasks:
-        if datetime.utcnow() + timedelta(days=7) >= task.deadline >= datetime.utcnow():
-            send_reminder_email(task)
+    with app.app_context():
+        current_time = datetime.now()
+        tasks = Task.query.all()
+        
+        for task in tasks:
+            if not task.notification_preferences:
+                continue
+                
+            preferences = task.notification_preferences.split(',')
+            time_until_deadline = task.deadline - current_time
+            
+            notification_times = {
+                '1week': 7 * 24 * 60,
+                '2days': 2 * 24 * 60,
+                '1day': 24 * 60,
+                '5hours': 5 * 60,
+                '3hours': 3 * 60,
+                '1hour': 60,
+                '30min': 30
+            }
+            
+            for pref in preferences:
+                if pref in notification_times:
+                    minutes = notification_times[pref]
+                    if timedelta(minutes=minutes-1) <= time_until_deadline <= timedelta(minutes=minutes):
+                        if not task.last_notification or \
+                           (current_time - task.last_notification).total_seconds() > 3600:
+                            user = User.query.get(task.user_id)
+                            if user and user.email:
+                                notification_text = {
+                                    '1week': 'أسبوع',
+                                    '2days': 'يومين',
+                                    '1day': 'يوم',
+                                    '5hours': '5 ساعات',
+                                    '3hours': '3 ساعات',
+                                    '1hour': 'ساعة',
+                                    '30min': 'نصف ساعة'
+                                }
+                                
+                                subject = f"تذكير: {task.title} ينتهي خلال {notification_text[pref]}"
+                                body = f"""
+                                مرحباً {user.username}،
+                                
+                                هذا تذكير بأن مهمتك "{task.title}" ستنتهي خلال {notification_text[pref]}.
+                                
+                                تفاصيل المهمة:
+                                - الوصف: {task.description}
+                                - الموعد النهائي: {task.deadline.strftime('%Y-%m-%d %H:%M')}
+                                
+                                يرجى إكمال المهمة في الوقت المحدد.
+                                """
+                                
+                                msg = Message(subject,
+                                            sender=app.config['MAIL_USERNAME'],
+                                            recipients=[user.email])
+                                msg.body = body
+                                mail.send(msg)
+                                
+                                task.last_notification = current_time
+                                db.session.commit()
 
 scheduler = BackgroundScheduler(timezone=pytz.UTC)
-scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", hours=24)
+scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
 scheduler.start()
 
 def init_db():
@@ -118,59 +178,47 @@ def tasks():
     user_tasks = Task.query.filter_by(user_id=current_user.id).all()
     return render_template('tasks.html', tasks=user_tasks)
 
-@app.route('/task/new', methods=['GET', 'POST'])
+@app.route('/create_task', methods=['GET', 'POST'])
 @login_required
-def new_task():
+def create_task():
     if request.method == 'POST':
-        title = request.form['title']
-        description = request.form['description']
-        task_type = request.form['task_type']
-        deadline = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M')
+        title = request.form.get('title')
+        description = request.form.get('description')
+        task_type = request.form.get('task_type')
+        deadline = datetime.strptime(request.form.get('deadline'), '%Y-%m-%dT%H:%M')
+        
+        notifications = request.form.getlist('notifications')
+        notification_preferences = ','.join(notifications) if notifications else None
         
         task = Task(
             title=title,
             description=description,
             task_type=task_type,
             deadline=deadline,
-            user_id=current_user.id
+            user_id=current_user.id,
+            notification_preferences=notification_preferences
         )
         
-        # حفظ المهمة أولاً للحصول على task.id
+        files = request.files.getlist('attachments')
+        for file in files:
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                
+                attachment = Attachment(
+                    filename=filename,
+                    file_type=file.content_type,
+                    task=task
+                )
+                db.session.add(attachment)
+        
         db.session.add(task)
         db.session.commit()
-        
-        # معالجة الملفات المرفقة
-        if 'attachments' in request.files:
-            files = request.files.getlist('attachments')
-            for file in files:
-                if file and file.filename:
-                    # تأمين اسم الملف
-                    filename = secure_filename(file.filename)
-                    # إضافة الوقت لتجنب تكرار الأسماء
-                    unique_filename = f"{int(time.time())}_{filename}"
-                    
-                    # حفظ الملف
-                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-                    file.save(file_path)
-                    
-                    # إنشاء مرفق جديد
-                    attachment = Attachment(
-                        filename=unique_filename,
-                        file_type=file.content_type,  # حفظ نوع الملف
-                        task_id=task.id
-                    )
-                    db.session.add(attachment)
-        
-        try:
-            db.session.commit()
-            flash('تم إضافة المهمة بنجاح!', 'success')
-            return redirect(url_for('tasks'))
-        except Exception as e:
-            db.session.rollback()
-            flash('حدث خطأ أثناء حفظ المهمة', 'error')
-            return redirect(url_for('new_task'))
+        flash('تم إنشاء المهمة بنجاح!', 'success')
+        return redirect(url_for('tasks'))
     
-    return render_template('new_task.html')
+    return render_template('create_task.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -247,40 +295,36 @@ def delete_task(task_id):
 def edit_task(task_id):
     task = Task.query.get_or_404(task_id)
     if task.user_id != current_user.id:
-        flash('لا يمكنك تعديل هذه المهمة', 'error')
-        return redirect(url_for('tasks'))
-    
+        abort(403)
+        
     if request.method == 'POST':
-        task.title = request.form['title']
-        task.description = request.form['description']
-        task.task_type = request.form['task_type']
-        task.deadline = datetime.strptime(request.form['deadline'], '%Y-%m-%dT%H:%M')
+        task.title = request.form.get('title')
+        task.description = request.form.get('description')
+        task.task_type = request.form.get('task_type')
+        task.deadline = datetime.strptime(request.form.get('deadline'), '%Y-%m-%dT%H:%M')
         
-        # معالجة الملفات المرفقة الجديدة
-        if 'attachments' in request.files:
-            files = request.files.getlist('attachments')
-            for file in files:
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    unique_filename = f"{int(time.time())}_{filename}"
-                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-                    file.save(file_path)
-                    
-                    attachment = Attachment(
-                        filename=unique_filename,
-                        file_type=file.content_type,
-                        task_id=task.id
-                    )
-                    db.session.add(attachment)
+        # تحديث تفضيلات الإشعارات
+        notifications = request.form.getlist('notifications')
+        task.notification_preferences = ','.join(notifications) if notifications else None
         
-        try:
-            db.session.commit()
-            flash('تم تحديث المهمة بنجاح', 'success')
-            return redirect(url_for('tasks'))
-        except Exception as e:
-            db.session.rollback()
-            flash('حدث خطأ أثناء تحديث المهمة', 'error')
-    
+        files = request.files.getlist('attachments')
+        for file in files:
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                
+                attachment = Attachment(
+                    filename=filename,
+                    file_type=file.content_type,
+                    task=task
+                )
+                db.session.add(attachment)
+        
+        db.session.commit()
+        flash('تم تحديث المهمة بنجاح!', 'success')
+        return redirect(url_for('tasks'))
+        
     return render_template('edit_task.html', task=task)
 
 @app.route('/delete_attachment/<int:attachment_id>', methods=['POST'])

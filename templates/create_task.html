@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>إنشاء مهمة جديدة</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <div class="mb-3">
+            <label for="title" class="form-label">عنوان المهمة</label>
+            <input type="text" class="form-control" id="title" name="title" required>
+        </div>
+        <div class="mb-3">
+            <label for="description" class="form-label">وصف المهمة</label>
+            <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+        </div>
+        <div class="mb-3">
+            <label for="task_type" class="form-label">نوع المهمة</label>
+            <select class="form-control" id="task_type" name="task_type" required>
+                <option value="عمل">عمل</option>
+                <option value="شخصي">شخصي</option>
+                <option value="دراسة">دراسة</option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="deadline" class="form-label">الموعد النهائي</label>
+            <input type="datetime-local" class="form-control" id="deadline" name="deadline" required>
+        </div>
+        <div class="mb-3">
+            <label for="attachments" class="form-label">المرفقات</label>
+            <input type="file" class="form-control" id="attachments" name="attachments" multiple>
+        </div>
+        
+        <div class="mb-3">
+            <label class="form-label">تفضيلات الإشعارات</label>
+            <div class="notification-preferences">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="1week" id="notify-1week" checked>
+                    <label class="form-check-label" for="notify-1week">قبل أسبوع</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="2days" id="notify-2days" checked>
+                    <label class="form-check-label" for="notify-2days">قبل يومين</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="1day" id="notify-1day" checked>
+                    <label class="form-check-label" for="notify-1day">قبل يوم</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="5hours" id="notify-5hours" checked>
+                    <label class="form-check-label" for="notify-5hours">قبل 5 ساعات</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="3hours" id="notify-3hours" checked>
+                    <label class="form-check-label" for="notify-3hours">قبل 3 ساعات</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="1hour" id="notify-1hour" checked>
+                    <label class="form-check-label" for="notify-1hour">قبل ساعة</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="notifications" value="30min" id="notify-30min" checked>
+                    <label class="form-check-label" for="notify-30min">قبل نصف ساعة</label>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">إنشاء المهمة</button>
+        <a href="{{ url_for('tasks') }}" class="btn btn-secondary">إلغاء</a>
+    </form>
+</div>
+
+<style>
+.notification-preferences {
+    border: 1px solid #dee2e6;
+    border-radius: 0.25rem;
+    padding: 1rem;
+    background-color: #f8f9fa;
+}
+
+.notification-preferences .form-check {
+    margin-bottom: 0.5rem;
+}
+</style>
+{% endblock %}
