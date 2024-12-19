@@ -3,10 +3,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
-from flask_mail import Mail, Message
 from flask_migrate import Migrate
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime
 from werkzeug.utils import secure_filename
 
 # تكوين المجلد للملفات المرفقة
@@ -31,20 +29,11 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-# تكوين البريد الإلكتروني
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', '587'))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() == 'true'
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
-
 # تهيئة الإضافات
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-mail = Mail(app)
 migrate = Migrate(app, db)
 
 # تعريف النماذج
@@ -70,7 +59,6 @@ class Task(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     attachments = db.relationship('Attachment', backref='task', lazy=True, cascade='all, delete-orphan')
-    notification_sent = db.Column(db.Boolean, default=False)
 
 class Attachment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -81,46 +69,6 @@ class Attachment(db.Model):
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
-
-def send_notification(task):
-    """إرسال إشعار بريد إلكتروني للمستخدم"""
-    try:
-        if task.notification_sent:
-            return False
-
-        user = User.query.get(task.user_id)
-        if not user or not user.email:
-            return False
-
-        time_until_deadline = task.deadline - datetime.now()
-        if time_until_deadline > timedelta(days=1):
-            return False
-
-        subject = f"تذكير: المهمة {task.title} قريبة من الموعد النهائي"
-        body = f"""
-        مرحباً {user.username}،
-
-        هذا تذكير بأن مهمتك "{task.title}" ستنتهي قريباً.
-
-        تفاصيل المهمة:
-        - الوصف: {task.description}
-        - الموعد النهائي: {task.deadline.strftime('%Y-%m-%d %H:%M')}
-
-        يرجى إكمال المهمة في الوقت المحدد.
-        """
-
-        msg = Message(
-            subject=subject,
-            recipients=[user.email],
-            body=body
-        )
-        mail.send(msg)
-        task.notification_sent = True
-        db.session.commit()
-        return True
-    except Exception as e:
-        print(f"خطأ في إرسال الإشعار: {e}")
-        return False
 
 @app.before_first_request
 def create_tables():
@@ -136,23 +84,6 @@ def create_tables():
             db.session.commit()
     except Exception as e:
         print(f"خطأ في إنشاء الجداول: {e}")
-
-@app.route('/check_notifications')
-def check_notifications():
-    """التحقق من المواعيد النهائية وإرسال الإشعارات"""
-    try:
-        tasks = Task.query.filter(
-            Task.deadline > datetime.now(),
-            Task.notification_sent == False
-        ).all()
-
-        for task in tasks:
-            send_notification(task)
-
-        return jsonify({"status": "success"})
-    except Exception as e:
-        print(f"خطأ في فحص الإشعارات: {e}")
-        return jsonify({"status": "error", "message": str(e)})
 
 @app.route('/')
 def home():
