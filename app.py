@@ -44,6 +44,23 @@ login_manager.login_view = 'login'
 mail = Mail(app)
 migrate = Migrate(app, db)
 
+# تكوين المجدول
+scheduler = BackgroundScheduler(timezone=pytz.UTC)
+scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
+scheduler.start()
+
+@app.before_first_request
+def create_tables():
+    db.create_all()
+    
+    # إنشاء مستخدم افتراضي إذا لم يكن موجوداً
+    admin_user = User.query.filter_by(username='admin').first()
+    if not admin_user:
+        admin = User(username='admin', email='admin@example.com')
+        admin.set_password('admin123')
+        db.session.add(admin)
+        db.session.commit()
+
 # تعريف النماذج
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -148,26 +165,6 @@ def check_upcoming_deadlines():
                                 
                                 task.last_notification = current_time
                                 db.session.commit()
-
-scheduler = BackgroundScheduler(timezone=pytz.UTC)
-scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
-scheduler.start()
-
-def init_db():
-    with app.app_context():
-        # إنشاء جميع الجداول
-        db.create_all()
-        
-        # التحقق من وجود مستخدم افتراضي
-        admin_user = User.query.filter_by(username='admin').first()
-        if not admin_user:
-            admin = User(username='admin', email='admin@example.com')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            db.session.commit()
-
-# تهيئة قاعدة البيانات عند بدء التطبيق
-init_db()
 
 @app.route('/')
 def home():
