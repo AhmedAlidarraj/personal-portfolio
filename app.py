@@ -1,21 +1,21 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_bcrypt import Bcrypt
+from flask_mail import Mail, Message
+from flask_migrate import Migrate
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask_mail import Mail, Message
-import os
 import pytz
 from werkzeug.utils import secure_filename
-import time
-from flask_bcrypt import Bcrypt, generate_password_hash, check_password_hash
-from flask_migrate import Migrate
 
 # تكوين المجلد للملفات المرفقة
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static/uploads')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# تكوين التطبيق
 app = Flask(__name__)
 
 # تكوين السر
@@ -28,6 +28,7 @@ if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///site.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# تكوين المجلد للملفات المرفقة
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -46,29 +47,6 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 mail = Mail(app)
 migrate = Migrate(app, db)
-
-# تكوين المجدول
-try:
-    scheduler = BackgroundScheduler(timezone=pytz.UTC)
-    scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
-    scheduler.start()
-except Exception as e:
-    print(f"Error starting scheduler: {e}")
-
-@app.before_first_request
-def create_tables():
-    try:
-        db.create_all()
-        
-        # إنشاء مستخدم افتراضي إذا لم يكن موجوداً
-        admin_user = User.query.filter_by(username='admin').first()
-        if not admin_user:
-            admin = User(username='admin', email='admin@example.com')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            db.session.commit()
-    except Exception as e:
-        print(f"Error in create_tables: {e}")
 
 # تعريف النماذج
 class User(UserMixin, db.Model):
@@ -107,10 +85,26 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 def send_reminder_email(task):
-    msg = Message('Task Reminder',
-                 sender=app.config['MAIL_USERNAME'],
-                 recipients=[task.user.email])
-    msg.body = f'Reminder: Your task "{task.title}" is due in one week on {task.deadline}'
+    user = User.query.get(task.user_id)
+    if not user or not user.email:
+        return
+    
+    subject = f"تذكير: المهمة {task.title} قريبة من الموعد النهائي"
+    body = f"""
+    مرحباً {user.username}،
+    
+    هذا تذكير بأن مهمتك "{task.title}" ستنتهي قريباً.
+    
+    تفاصيل المهمة:
+    - الوصف: {task.description}
+    - الموعد النهائي: {task.deadline.strftime('%Y-%m-%d %H:%M')}
+    
+    يرجى إكمال المهمة في الوقت المحدد.
+    """
+    
+    msg = Message(subject,
+                recipients=[user.email],
+                body=body)
     mail.send(msg)
 
 def check_upcoming_deadlines():
@@ -141,39 +135,35 @@ def check_upcoming_deadlines():
                     if timedelta(minutes=minutes-1) <= time_until_deadline <= timedelta(minutes=minutes):
                         if not task.last_notification or \
                            (current_time - task.last_notification).total_seconds() > 3600:
-                            user = User.query.get(task.user_id)
-                            if user and user.email:
-                                notification_text = {
-                                    '1week': 'أسبوع',
-                                    '2days': 'يومين',
-                                    '1day': 'يوم',
-                                    '5hours': '5 ساعات',
-                                    '3hours': '3 ساعات',
-                                    '1hour': 'ساعة',
-                                    '30min': 'نصف ساعة'
-                                }
-                                
-                                subject = f"تذكير: {task.title} ينتهي خلال {notification_text[pref]}"
-                                body = f"""
-                                مرحباً {user.username}،
-                                
-                                هذا تذكير بأن مهمتك "{task.title}" ستنتهي خلال {notification_text[pref]}.
-                                
-                                تفاصيل المهمة:
-                                - الوصف: {task.description}
-                                - الموعد النهائي: {task.deadline.strftime('%Y-%m-%d %H:%M')}
-                                
-                                يرجى إكمال المهمة في الوقت المحدد.
-                                """
-                                
-                                msg = Message(subject,
-                                            sender=app.config['MAIL_USERNAME'],
-                                            recipients=[user.email])
-                                msg.body = body
-                                mail.send(msg)
-                                
+                            try:
+                                send_reminder_email(task)
                                 task.last_notification = current_time
                                 db.session.commit()
+                            except Exception as e:
+                                print(f"Error sending reminder email: {e}")
+
+# تكوين المجدول
+try:
+    scheduler = BackgroundScheduler(timezone=pytz.UTC)
+    scheduler.add_job(func=check_upcoming_deadlines, trigger="interval", minutes=5)
+    scheduler.start()
+except Exception as e:
+    print(f"Error starting scheduler: {e}")
+
+@app.before_first_request
+def create_tables():
+    try:
+        db.create_all()
+        
+        # إنشاء مستخدم افتراضي إذا لم يكن موجوداً
+        admin_user = User.query.filter_by(username='admin').first()
+        if not admin_user:
+            admin = User(username='admin', email='admin@example.com')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+    except Exception as e:
+        print(f"Error in create_tables: {e}")
 
 @app.route('/')
 def home():
