@@ -53,10 +53,10 @@ class User(UserMixin, db.Model):
     tasks = db.relationship('Task', backref='user', lazy=True)
 
     def set_password(self, password):
-        self.password = generate_password_hash(password)
+        self.password = bcrypt.generate_password_hash(password).decode('utf-8')
 
     def check_password(self, password):
-        return check_password_hash(self.password, password)
+        return bcrypt.check_password_hash(self.password, password)
 
 class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
