@@ -8,7 +8,8 @@ pip install -r requirements.txt
 # Create necessary directories
 mkdir -p static/uploads
 
-# Reset and initialize the database
+# Initialize and upgrade the database
+export FLASK_APP=app.py
 flask db stamp head
-flask db migrate -m "Remove notification system"
+flask db migrate -m "Add notification fields"
 flask db upgrade
